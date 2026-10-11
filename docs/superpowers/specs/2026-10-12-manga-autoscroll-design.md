@@ -1,7 +1,8 @@
 # Manga Auto-Scroll: Design
 
 Date: 2026-10-12
-Status: Approved in conversation, awaiting written-spec review
+Status: Approved; refined during planning (scroll-target rule, pointer
+handling, in-place chapter changes, double-press guard, smoke test)
 
 ## Goal
 
@@ -71,7 +72,10 @@ A small pill fixed to the bottom-right corner of the viewport.
 | paused | `❚❚ 60` |
 | ended | `■ End` |
 
-- Rendered inside a Shadow DOM so site CSS cannot restyle it.
+- A `<manga-scroll-badge>` element appended to `<html>` (not `<body>`,
+  whose transforms would break `position: fixed`), with an open shadow root
+  so site CSS cannot restyle the pill.
+- `▶` is followed by U+FE0E so macOS draws it as text, not as an emoji.
 - `position: fixed`, `z-index: 2147483647`, `pointer-events: none`.
 - Dark translucent background, white text, thin light border so it reads on
   both white and black pages. System font, 13px.
@@ -100,16 +104,19 @@ manga-autoscroll/
   src/scroll-target.js
   src/scroller.js
   src/badge.js
+  src/keys.js
   src/content.js
+  scripts/make-icons.js                        (generates the icons, no deps)
   icons/icon16.png, icon48.png, icon128.png   (simple solid-color glyph)
-  test/scroll-target.test.js
-  test/scroller.test.js
+  test/*.test.js                               (unit tests)
   test/reader.html
+  test/browser-smoke.js                        (headless-Chrome smoke test)
+  README.md
 ```
 
 Content scripts are classic scripts injected in order:
-`scroll-target.js`, `scroller.js`, `badge.js`, `content.js`. The first three
-attach their exports to `globalThis.MangaScroll` and also set
+`scroll-target.js`, `scroller.js`, `badge.js`, `keys.js`, `content.js`. The
+first four attach their exports to `globalThis.MangaScroll` and also set
 `module.exports` when `module` exists, so the same files load in the browser
 and in Node tests.
 
@@ -125,8 +132,11 @@ Handles `chrome.commands.onCommand` (`toggle-scroll`) and
 
 1. Run `() => Boolean(window.__mangaScroll)` with `chrome.scripting.executeScript`.
 2. If true, run `() => window.__mangaScroll.toggle()`.
-3. If false, inject the four content script files. `content.js` starts
+3. If false, inject the five content script files. `content.js` starts
    scrolling on load.
+
+While a toggle is in progress for a tab, further triggers for that tab are
+ignored, so a quick double press cannot inject twice.
 
 If injection fails, for example on browser-internal pages or the extension
 store, catch the error and log it. Nothing is shown to the user.
@@ -135,14 +145,18 @@ store, catch the error and log it. Nothing is shown to the user.
 
 `findScrollTarget(doc, getStyle)` returns the element to scroll.
 
-1. If `doc.scrollingElement.scrollHeight - clientHeight > 50`, return
-   `doc.scrollingElement`.
-2. Otherwise, consider every element whose computed `overflow-y` is `auto`,
-   `scroll`, or `overlay`, with `scrollHeight - clientHeight > 50` and
-   `clientHeight > 0`. Return the one with the largest
-   `clientWidth * clientHeight`.
-3. If none qualifies, return `doc.scrollingElement`. The engine will reach
-   the end and stop.
+The candidate that can scroll furthest (`scrollHeight - clientHeight`) wins,
+because the strip is almost always the longest thing on the page.
+
+1. `doc.scrollingElement` is the starting candidate and wins ties.
+2. Any element can beat it if its computed `overflow-y` is `auto`, `scroll`,
+   or `overlay`, it scrolls more than 50 px, `clientHeight > 0`, and its
+   bounding box intersects the viewport.
+3. If nothing scrolls more than 50 px, return `doc.scrollingElement`. The
+   engine will reach the end and stop.
+
+This also handles pages where a header or footer makes the document scroll
+a little while the strip scrolls inside a box.
 
 `getStyle` defaults to `getComputedStyle` and is injectable for tests.
 
@@ -153,16 +167,18 @@ returns an object with:
 
 - `start()`, `pause()`, `resume()`, `toggle()`, `stop()`
 - `faster()`, `slower()`, `setSpeed(n)` (clamped to 10–400)
-- `userActivity()`: the user scrolled by hand; hold, then resume 1500 ms later
-- `setPointerDown(isDown)`: hold while a pointer is down; release acts like
-  `userActivity()`
+- `userActivity()`: the user scrolled by hand; hold, then resume 1500 ms
+  after the last call. Pointer presses count too. Chrome often sends no
+  `pointerup` after a scrollbar drag, so there is no "hold until released".
 - `getState()`, `getSpeed()`
 
 `onChange(state, speed)` is called on every state or speed change.
+An invalid speed (missing, `NaN`, non-number) becomes 60.
 
 #### States
 
-`running`, `paused`, `holding`, `endWait`, `ended`, `stopped`.
+`running`, `paused`, `holding`, `endWait`, `ended`, `stopped`. The engine
+starts in `paused`; `start()` is the same as `resume()`.
 
 #### Each frame
 
@@ -176,8 +192,7 @@ three active states from an inactive one requests a frame and resets
 2. Read `actual = target.scrollTop`. If it differs from the last value the
    engine wrote by more than 3 px, something else moved the page (scroll
    anchoring, site scripts, user input). Set `pos = actual`.
-3. In `holding`: write nothing. When the pointer is not down and
-   `now >= resumeAt`, switch to `running`.
+3. In `holding`: write nothing. When `now >= resumeAt`, switch to `running`.
 4. In `running`: `pos += speed * dt / 1000`. `pos` is a float, so slow
    speeds accumulate instead of rounding to zero. Clamp `pos` to
    `maxPos = scrollHeight - clientHeight`. Write with
@@ -207,20 +222,26 @@ On load:
 1. If `window.__mangaScroll` exists, do nothing. Background normally prevents
    this.
 2. Find the target with `findScrollTarget`.
-3. Save the target's inline `scroll-snap-type`, then set it to `none` so
-   mandatory snap points cannot pull the page back.
-4. Read `speed` from storage, falling back to 60.
-5. Create the badge and the scroller, then start.
-6. Expose `window.__mangaScroll = { toggle, off }`.
+3. Save the target's inline `scroll-snap-type`, then set it to
+   `none !important` so mandatory snap points cannot pull the page back.
+4. Create the badge and the scroller (paused).
+5. Expose `window.__mangaScroll = { toggle, off }` synchronously, before any
+   async work, so a second injection sees it and backs off.
+6. Read `speed` from storage (falling back to 60), set it, then start.
 
-Listeners, all registered with `{ capture: true }` on `window`:
+Listeners, all registered with `{ capture: true }` on `window`. Key mapping
+lives in `keys.js` as `keyAction(event)`:
 
-- `keydown`: handle Space, `=`/`+`, `-`/`_` and Esc as in the key table.
-  Arrow keys, PageUp, PageDown, Home and End call `userActivity()` and keep
-  their default behavior.
-- `wheel`, `touchmove`: `userActivity()`. Passive listeners.
-- `pointerdown`: `setPointerDown(true)`. `pointerup` and `pointercancel`:
-  `setPointerDown(false)`. This covers dragging the scrollbar.
+- `keydown`: Space, `=`/`+` and `-`/`_` act as in the key table and call
+  `preventDefault()` and `stopPropagation()`, so a site's own handlers for
+  those keys do not also fire. Esc calls `off()` and is left to propagate,
+  so the site can still close its own menus. Arrow keys, PageUp, PageDown,
+  Home and End call `userActivity()` and keep their default behavior.
+- `wheel`, `touchmove`, `pointerdown`: `userActivity()`. Passive listeners.
+
+`toggle()` checks `target.isConnected` first. If the reader replaced its
+scroll box (a single-page reader loading the next chapter in place), it
+calls `off()` and mounts again on the new box instead of toggling.
 
 `off()` (Esc) stops the scroller, removes the badge and every listener,
 restores the saved `scroll-snap-type`, and deletes `window.__mangaScroll`.
@@ -246,30 +267,49 @@ queue, and covers:
 - Reaching the bottom enters `endWait`. Growing `scrollHeight` during the
   wait resumes. No growth for 3000 ms enters `ended`.
 - `toggle()` from each state lands in the state given above.
-- Speed clamps at 10 and 400, and steps by 10.
+- Speed clamps at 10 and 400, steps by 10, and invalid values become 60.
 
 `scroll-target.test.js` uses fake element objects and a fake `getStyle`, and
 covers:
 
-- A scrollable document wins.
-- With a non-scrolling document, the largest scrollable box wins over a
-  smaller one.
-- Boxes with `overflow-y: hidden`, zero height, or under 50 px of overflow
-  are ignored.
+- A long scrolling document wins over a small scrolling box.
+- The box that scrolls furthest wins.
+- A strip box beats a document that only scrolls a little.
+- Boxes with `overflow-y: hidden`, zero height, 50 px or less of overflow,
+  or off screen are ignored.
 - With no candidates, the document is returned.
+
+`keys.test.js` covers the key table, scroll keys as activity, modifiers,
+text fields and IME composition. `badge.test.js` covers the badge text.
+`background.test.js` uses a fake `chrome.scripting` and covers first
+injection, later toggles, a double press, and pages that refuse scripts.
+`manifest.test.js` checks permissions, the shortcut, and that every
+referenced file exists.
 
 ### Test page
 
-`test/reader.html` is a self-contained fake long-strip reader. It makes no
-network requests.
+`test/reader.html` is a self-contained fake long-strip reader, awkward on
+purpose. It makes no network requests.
 
-- The page body does not scroll; the strip sits inside an
-  `overflow-y: auto` box.
-- About 15 tall placeholder "pages" built from inline SVG or CSS, so the
-  strip is long.
-- The last few pages are appended after a 2 s delay, to exercise `endWait`.
-- `scroll-behavior: smooth` is set on the scroll box.
-- A text box at the top for checking that typing is not treated as keys.
+- The strip scrolls inside an `overflow-y: auto` box, and a footer makes the
+  whole page scroll by 160 px as well.
+- 12 tall CSS placeholder pages, plus 3 more appended after 2 s, to
+  exercise `endWait`.
+- `scroll-behavior: smooth` and `scroll-snap-type: y mandatory` on the box.
+- A text box for checking that typing is not treated as keys.
+- A "Next chapter" button that replaces the scroll box without a page load.
+- Its own Space handler, which writes a message if it ever runs while
+  auto-scroll is on.
+
+### Browser smoke test
+
+`test/browser-smoke.js` opens the test page in headless Google Chrome,
+injects the content scripts into the page with `chrome.storage` stubbed,
+and drives it through the Chrome DevTools Protocol using Node's built-in
+`WebSocket`. It checks real scrolling, the badge, keys, holds, the end,
+the in-place chapter change, and cleanup. Run it with
+`node test/browser-smoke.js`. It is separate from `node --test` because it
+needs Chrome.
 
 ### Manual checklist (in Comet)
 
@@ -284,13 +324,16 @@ network requests.
    the speed is remembered.
 6. Space pauses and resumes. Typing in the text box does not.
 7. Scroll with the trackpad: it pauses, then resumes about 1.5 s later.
+   Dragging the scrollbar does the same.
 8. It waits at the bottom, continues when the late pages appear, then shows
    `■ End`.
-9. Esc removes the badge, and the keys stop responding.
-10. Repeat steps 4–9 on a real manga site in long-strip mode.
+9. Click "Next chapter", press `Alt+S`: the new chapter scrolls.
+10. Esc removes the badge, and the keys stop responding.
+11. Repeat steps 4–10 (except 9) on a real manga site in long-strip mode.
 
 ## Done when
 
 - `node --test test/` passes.
+- `node test/browser-smoke.js` passes.
 - Every item on the manual checklist passes in Comet on the test page and on
   at least one real manga site.
