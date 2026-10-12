@@ -46,7 +46,10 @@ node scripts/make-icons.js   # regenerate icons
 
 ## Manual checklist (Comet)
 
-Open `test/reader.html` (drag it into a Comet tab), then:
+The test page is a local file, so first open the extension's **Details** on
+`chrome://extensions` and turn on **Allow access to file URLs**. Without it, `Alt+S`
+silently does nothing on the test page. Then open `test/reader.html` (drag it into a
+Comet tab) and:
 
 1. `Alt+S`: scrolling starts, the pill shows `▶ 60` (or your saved speed).
 2. `=` and `-` change the speed. Reload, press `Alt+S`: the speed is remembered.

@@ -239,9 +239,13 @@ lives in `keys.js` as `keyAction(event)`:
   Home and End call `userActivity()` and keep their default behavior.
 - `wheel`, `touchmove`, `pointerdown`: `userActivity()`. Passive listeners.
 
-`toggle()` checks `target.isConnected` first. If the reader replaced its
-scroll box (a single-page reader loading the next chapter in place), it
-calls `off()` and mounts again on the new box instead of toggling.
+The target can go stale: a single-page reader may replace its scroll box
+when it loads the next chapter in place, or the strip's images may have had
+no height yet when `Alt+S` was pressed, so the page itself was picked. So
+whenever the engine reaches `ended`, and whenever `toggle()` runs while
+`ended` or with a disconnected target, `findScrollTarget` runs again. If it
+returns a different element, the extension calls `off()` and mounts again
+on that element instead of toggling.
 
 `off()` (Esc) stops the scroller, removes the badge and every listener,
 restores the saved `scroll-snap-type`, and deletes `window.__mangaScroll`.
@@ -261,7 +265,7 @@ queue, and covers:
 - Slow speed (10 px/s at 16 ms frames) still advances after enough frames.
 - A frame gap of 5 s advances by at most `speed * 0.1` px.
 - `userActivity()` stops writes, then resumes 1500 ms after the last call.
-- Pointer down holds indefinitely; release resumes after 1500 ms.
+- Input during the end wait holds too; input while paused does nothing.
 - An external `scrollTop` change of more than 3 px is adopted as the new
   position without pausing.
 - Reaching the bottom enters `endWait`. Growing `scrollHeight` during the
@@ -300,6 +304,8 @@ purpose. It makes no network requests.
 - A "Next chapter" button that replaces the scroll box without a page load.
 - Its own Space handler, which writes a message if it ever runs while
   auto-scroll is on.
+- With `?lazy`, pages have no height until `growPages()` runs, like images
+  that have not loaded yet when `Alt+S` is pressed.
 
 ### Browser smoke test
 
