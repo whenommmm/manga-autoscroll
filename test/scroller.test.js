@@ -205,3 +205,85 @@ test('pausing while holding pauses; resuming runs straight away', () => {
   frames(1);
   assert.equal(target.scrollTop, 36);
 });
+
+const SHORT = { scrollHeight: 1100, clientHeight: 1000, speed: 400 }; // 100 px to scroll
+
+test('at the bottom it waits, then stops after 3 s with no new content', () => {
+  const { scroller, target, frames, hasPendingFrame } = setup(SHORT);
+  scroller.start();
+  frames(3); // 40, 80, 100 (bottom) at t=300
+  assert.equal(target.scrollTop, 100);
+  assert.equal(scroller.getState(), 'endWait');
+  frames(29); // t=3200
+  assert.equal(scroller.getState(), 'endWait');
+  frames(1); // t=3300: 3 s at the bottom
+  assert.equal(scroller.getState(), 'ended');
+  assert.equal(hasPendingFrame(), false);
+});
+
+test('if more pages load during the wait, it keeps scrolling', () => {
+  const { scroller, target, frames } = setup(SHORT);
+  scroller.start();
+  frames(3); // bottom
+  target.scrollHeight = 3000; // late images arrived
+  frames(1);
+  assert.equal(scroller.getState(), 'running');
+  frames(1);
+  assert.equal(target.scrollTop, 140);
+});
+
+test('resuming after the end with nothing new ends again after 3 s', () => {
+  const { scroller, frames } = setup(SHORT);
+  scroller.start();
+  frames(33);
+  assert.equal(scroller.getState(), 'ended');
+  scroller.toggle();
+  assert.equal(scroller.getState(), 'running');
+  frames(1);
+  assert.equal(scroller.getState(), 'endWait');
+  frames(30);
+  assert.equal(scroller.getState(), 'ended');
+});
+
+test('resuming after the end when the page grew keeps scrolling', () => {
+  const { scroller, target, frames } = setup(SHORT);
+  scroller.start();
+  frames(33);
+  target.scrollHeight = 5000; // e.g. the reader appended the next chapter
+  scroller.toggle();
+  frames(2);
+  assert.equal(scroller.getState(), 'running');
+  assert.equal(target.scrollTop, 180);
+});
+
+test('pausing during the end wait pauses', () => {
+  const { scroller, frames, hasPendingFrame } = setup(SHORT);
+  scroller.start();
+  frames(3);
+  assert.equal(scroller.getState(), 'endWait');
+  scroller.toggle();
+  assert.equal(scroller.getState(), 'paused');
+  assert.equal(hasPendingFrame(), false);
+});
+
+test('scrolling back up during the end wait holds, then scrolls on', () => {
+  const { scroller, target, frames } = setup(SHORT);
+  scroller.start();
+  frames(3); // t=300
+  assert.equal(scroller.getState(), 'endWait');
+  scroller.userActivity(); // resume at t=1800
+  target.scrollTop = 0;
+  frames(15); // t=1800
+  assert.equal(scroller.getState(), 'running');
+  frames(1);
+  assert.equal(target.scrollTop, 40);
+});
+
+test('a page that cannot scroll at all ends instead of spinning forever', () => {
+  const { scroller, frames } = setup({ scrollHeight: 800, clientHeight: 1000 });
+  scroller.start();
+  frames(1);
+  assert.equal(scroller.getState(), 'endWait');
+  frames(30);
+  assert.equal(scroller.getState(), 'ended');
+});

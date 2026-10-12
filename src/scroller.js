@@ -1,6 +1,7 @@
-// The scroll engine. Moves a target down at a steady speed and holds while the
-// user scrolls by hand. Has no DOM dependencies, so it is tested with a fake
-// target, clock and frame queue.
+// The scroll engine. Moves a target down at a steady speed, holds while the
+// user scrolls by hand, and stops once the page has stopped growing at the
+// bottom. Has no DOM dependencies, so it is tested with a fake target, clock
+// and frame queue.
 (function (root) {
   const DEFAULT_SPEED = 60;
   const MIN_SPEED = 10;
@@ -9,7 +10,8 @@
   const MAX_FRAME_MS = 100; // longer gaps (e.g. a background tab) never cause a jump
   const DRIFT_PX = 3; // a bigger difference means something else moved the page
   const HOLD_MS = 1500;
-  const ACTIVE = new Set(['running', 'holding']);
+  const END_WAIT_MS = 3000; // lazy-loaded images below may still be arriving
+  const ACTIVE = new Set(['running', 'holding', 'endWait']);
 
   function clampSpeed(n) {
     if (!Number.isFinite(n)) return DEFAULT_SPEED;
@@ -24,6 +26,7 @@
     let lastFrame = 0;
     let frameId = null;
     let resumeAt = 0;
+    let endSince = 0;
 
     const maxPos = () => Math.max(0, target.scrollHeight - target.clientHeight);
 
@@ -53,24 +56,35 @@
         written = actual;
       }
 
-      if (state === 'running') advance(dt);
+      if (state === 'running') advance(dt, t);
       else if (state === 'holding') checkHold(t);
+      else if (state === 'endWait') checkEnd(t);
 
       if (ACTIVE.has(state)) frameId = requestFrame(frame);
     }
 
-    function advance(dt) {
-      pos = Math.min(pos + (currentSpeed * dt) / 1000, maxPos());
+    function advance(dt, t) {
+      const max = maxPos();
+      pos = Math.min(pos + (currentSpeed * dt) / 1000, max);
       target.scrollTo({ top: pos, behavior: 'instant' });
       written = pos;
+      if (pos >= max - 1) {
+        endSince = t;
+        setState('endWait');
+      }
     }
 
     function checkHold(t) {
       if (t >= resumeAt) setState('running');
     }
 
+    function checkEnd(t) {
+      if (maxPos() > pos + 1) setState('running');
+      else if (t - endSince >= END_WAIT_MS) setState('ended');
+    }
+
     function resume() {
-      if (state !== 'paused') return;
+      if (state !== 'paused' && state !== 'ended') return;
       pos = target.scrollTop;
       written = pos;
       setState('running');
