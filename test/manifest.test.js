@@ -35,3 +35,8 @@ test('icons are PNGs of the size their key says', () => {
     assert.equal(png.readUInt32BE(20), Number(size), `${file} height`);
   }
 });
+
+test('every content script background.js injects exists', () => {
+  const { CONTENT_FILES } = require('../src/background.js');
+  for (const file of CONTENT_FILES) assert.ok(exists(file), file);
+});

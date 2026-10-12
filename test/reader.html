@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fake manga reader</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+  header { height: 56px; display: flex; gap: 12px; align-items: center; padding: 0 16px; background: #222; }
+  #log { font-size: 12px; color: #f88; }
+  .reader { height: calc(100vh - 56px); overflow-y: auto; scroll-behavior: smooth; scroll-snap-type: y mandatory; }
+  .page {
+    box-sizing: border-box; width: min(720px, 100%); height: 1100px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: center; scroll-snap-align: start;
+    border-bottom: 4px solid #111; background: #f4f1ea; color: #333; font-size: 56px; font-weight: 700;
+  }
+  .page.late { background: #dfe8f4; }
+  footer { height: 160px; padding: 16px; background: #222; }
+</style>
+</head>
+<body>
+<header>
+  <input id="typing" placeholder="Type here: Space, = and - must type, not control scrolling">
+  <button id="next">Next chapter (no page load)</button>
+  <span id="log"></span>
+</header>
+<main id="slot"></main>
+<footer>Footer: makes the whole page scroll a little, like many real sites.</footer>
+<script>
+  // Awkward on purpose:
+  // - the strip scrolls inside a box, while the page itself also scrolls by 160 px
+  // - the box has smooth scrolling and mandatory scroll snapping
+  // - the last three pages arrive 2 s late, like lazy-loaded images
+  // - "Next chapter" swaps in a new box without reloading, like single-page readers
+  // - the site has its own Space handler, which must not run while auto-scroll is on
+  let chapter = 0;
+
+  function addPages(reader, from, to, late) {
+    for (let i = from; i <= to; i++) {
+      const page = document.createElement('div');
+      page.className = late ? 'page late' : 'page';
+      page.textContent = `Ch ${chapter} · Page ${i}`;
+      reader.append(page);
+    }
+  }
+
+  function loadChapter() {
+    chapter++;
+    const reader = document.createElement('div');
+    reader.className = 'reader';
+    reader.id = 'reader';
+    addPages(reader, 1, 12, false);
+    document.getElementById('slot').replaceChildren(reader);
+    setTimeout(() => addPages(reader, 13, 15, true), 2000);
+  }
+
+  document.getElementById('next').addEventListener('click', loadChapter);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === ' ' && event.target === document.body) {
+      document.getElementById('log').textContent = 'Site Space handler ran';
+    }
+  });
+  loadChapter();
+</script>
+</body>
+</html>
