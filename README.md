@@ -2,9 +2,9 @@
 
 Hands-free reading for long-strip manga in Perplexity Comet (or any Chromium browser).
 Press `CTRL+ M` on a chapter and it activates the extension.
-## Install (Comet)
+## Install
 
-1. Open Comet's extensions page: type `chrome://extensions` in the address bar.
+1. Open browser's extensions page: type `chrome://extensions` in the address bar.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and choose this folder (`manga-autoscroll`).
 4. Open the extension shortcuts page (`chrome://extensions/shortcuts`) and check that
