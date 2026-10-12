@@ -14,6 +14,7 @@
     border-bottom: 4px solid #111; background: #f4f1ea; color: #333; font-size: 56px; font-weight: 700;
   }
   .page.late { background: #dfe8f4; }
+  .page.pending { height: 0; overflow: hidden; border: 0; }
   footer { height: 160px; padding: 16px; background: #222; }
 </style>
 </head>
@@ -32,12 +33,15 @@
   // - the last three pages arrive 2 s late, like lazy-loaded images
   // - "Next chapter" swaps in a new box without reloading, like single-page readers
   // - the site has its own Space handler, which must not run while auto-scroll is on
+  // - with ?lazy, pages have no height until growPages() runs, like images that
+  //   have not loaded yet when Alt+S is pressed
+  const lazy = new URLSearchParams(location.search).has('lazy');
   let chapter = 0;
 
   function addPages(reader, from, to, late) {
     for (let i = from; i <= to; i++) {
       const page = document.createElement('div');
-      page.className = late ? 'page late' : 'page';
+      page.className = (late ? 'page late' : 'page') + (lazy ? ' pending' : '');
       page.textContent = `Ch ${chapter} · Page ${i}`;
       reader.append(page);
     }
@@ -53,6 +57,9 @@
     setTimeout(() => addPages(reader, 13, 15, true), 2000);
   }
 
+  window.growPages = () => {
+    document.querySelectorAll('.page.pending').forEach((page) => page.classList.remove('pending'));
+  };
   document.getElementById('next').addEventListener('click', loadChapter);
   document.addEventListener('keydown', (event) => {
     if (event.key === ' ' && event.target === document.body) {

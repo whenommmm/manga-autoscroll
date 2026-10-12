@@ -37,16 +37,26 @@
       now: () => performance.now(),
       requestFrame: (fn) => requestAnimationFrame(fn),
       cancelFrame: (id) => cancelAnimationFrame(id),
-      onChange: (state, speed) => badge.show(state, speed),
+      onChange: (state, speed) => {
+        badge.show(state, speed);
+        // Outside the frame callback, so off() never runs inside the engine.
+        if (state === 'ended') setTimeout(() => scroller.getState() === 'ended' && retargetIfNeeded());
+      },
     });
 
+    // The page may now have a better element to scroll: the reader swapped in a
+    // new box (next chapter without a page load), or the strip's images had no
+    // height yet when Alt+S was pressed, so the page itself was picked.
+    function retargetIfNeeded() {
+      if (findScrollTarget(document) === target) return false;
+      off();
+      mount();
+      return true;
+    }
+
     function toggle() {
-      if (!target.isConnected) {
-        // The reader swapped in a new scroll box (next chapter without a page load).
-        off();
-        mount();
-        return;
-      }
+      const stale = scroller.getState() === 'ended' || !target.isConnected;
+      if (stale && retargetIfNeeded()) return;
       scroller.toggle();
     }
 

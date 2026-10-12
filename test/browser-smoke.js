@@ -78,13 +78,44 @@ const READ = {
 const press = (key, on = 'document.body') =>
   `${on}.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true })); true`;
 
-async function run(page) {
+async function injectContentScripts(page) {
   await page.evaluate(`Object.defineProperty(window, 'chrome', { configurable: true, value: {
     storage: { local: { get: async () => ({ speed: 200 }), set: async () => {} } },
   } }); true`);
   for (const file of CONTENT_FILES) {
     await page.evaluate(fs.readFileSync(path.join(ROOT, file), 'utf8') + '\n;true');
   }
+}
+
+async function loadLazyReader(page, url) {
+  await page.send('Page.navigate', { url: `${url}?lazy` });
+  await sleep(800);
+  await injectContentScripts(page);
+}
+
+// Readers whose images have no height yet when Alt+S is pressed: at first only
+// the page itself (by its 160 px footer) can scroll, so that is what gets picked.
+async function runLazy(page, url) {
+  await loadLazyReader(page, url);
+  await sleep(4500); // scroll the 160 px page, then the 3 s end wait
+  const badge = await page.evaluate(READ.badge);
+  check('with nothing loaded yet, it scrolls the page and ends', badge === '■ End', badge);
+  await page.evaluate(`growPages(); true`);
+  await page.evaluate(`window.__mangaScroll.toggle(); true`); // what background.js runs on Alt+S
+  await sleep(1000);
+  let top = await page.evaluate(READ.boxTop);
+  check('Alt+S after the pages load scrolls the strip', top > 100, top);
+
+  await loadLazyReader(page, url);
+  await sleep(300);
+  await page.evaluate(`growPages(); true`);
+  await sleep(5000); // page end + 3 s end wait, then it should find the strip by itself
+  top = await page.evaluate(READ.boxTop);
+  check('pages that load after Alt+S still get scrolled', top > 100, top);
+}
+
+async function run(page) {
+  await injectContentScripts(page);
   await sleep(300);
 
   let badge = await page.evaluate(READ.badge);
@@ -190,6 +221,7 @@ async function main() {
     page = await connect(await devtoolsPort(profile));
     await sleep(500); // let the page build its strip
     await run(page);
+    await runLazy(page, url);
   } finally {
     page?.close();
     if (browser.exitCode === null && browser.signalCode === null) {
