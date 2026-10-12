@@ -153,3 +153,55 @@ test('stop is final', () => {
   assert.equal(hasPendingFrame(), false);
   assert.equal(target.scrollTop, 0);
 });
+
+test('scrolling by hand holds for 1.5 s, then carries on from the new position', () => {
+  const { scroller, target, frames } = setup({ speed: 60 });
+  scroller.start();
+  frames(5); // t=500, at 30
+  scroller.userActivity(); // resume at t=2000
+  assert.equal(scroller.getState(), 'holding');
+  target.scrollTop = 800; // where the user's scroll landed
+  frames(14); // t=1900
+  assert.equal(scroller.getState(), 'holding');
+  assert.equal(target.scrollTop, 800);
+  frames(1); // t=2000: hold over
+  assert.equal(scroller.getState(), 'running');
+  frames(1);
+  assert.equal(target.scrollTop, 806);
+});
+
+test('more input while holding extends the hold', () => {
+  const { scroller, frames, changes } = setup();
+  scroller.start();
+  frames(5); // t=500
+  scroller.userActivity(); // until 2000
+  frames(10); // t=1500
+  scroller.userActivity(); // until 3000
+  frames(14); // t=2900
+  assert.equal(scroller.getState(), 'holding');
+  frames(1); // t=3000
+  assert.equal(scroller.getState(), 'running');
+  assert.equal(changes.filter(([state]) => state === 'holding').length, 1);
+});
+
+test('input while paused does not start or hold anything', () => {
+  const { scroller, hasPendingFrame } = setup();
+  scroller.start();
+  scroller.pause();
+  scroller.userActivity();
+  assert.equal(scroller.getState(), 'paused');
+  assert.equal(hasPendingFrame(), false);
+});
+
+test('pausing while holding pauses; resuming runs straight away', () => {
+  const { scroller, target, frames } = setup({ speed: 60 });
+  scroller.start();
+  frames(5); // at 30
+  scroller.userActivity();
+  scroller.toggle();
+  assert.equal(scroller.getState(), 'paused');
+  scroller.toggle();
+  assert.equal(scroller.getState(), 'running');
+  frames(1);
+  assert.equal(target.scrollTop, 36);
+});

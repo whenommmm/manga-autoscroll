@@ -1,5 +1,6 @@
-// The scroll engine. Moves a target down at a steady speed. Has no DOM
-// dependencies, so it is tested with a fake target, clock and frame queue.
+// The scroll engine. Moves a target down at a steady speed and holds while the
+// user scrolls by hand. Has no DOM dependencies, so it is tested with a fake
+// target, clock and frame queue.
 (function (root) {
   const DEFAULT_SPEED = 60;
   const MIN_SPEED = 10;
@@ -7,7 +8,8 @@
   const SPEED_STEP = 10;
   const MAX_FRAME_MS = 100; // longer gaps (e.g. a background tab) never cause a jump
   const DRIFT_PX = 3; // a bigger difference means something else moved the page
-  const ACTIVE = new Set(['running']);
+  const HOLD_MS = 1500;
+  const ACTIVE = new Set(['running', 'holding']);
 
   function clampSpeed(n) {
     if (!Number.isFinite(n)) return DEFAULT_SPEED;
@@ -21,6 +23,7 @@
     let written = 0;
     let lastFrame = 0;
     let frameId = null;
+    let resumeAt = 0;
 
     const maxPos = () => Math.max(0, target.scrollHeight - target.clientHeight);
 
@@ -51,6 +54,7 @@
       }
 
       if (state === 'running') advance(dt);
+      else if (state === 'holding') checkHold(t);
 
       if (ACTIVE.has(state)) frameId = requestFrame(frame);
     }
@@ -59,6 +63,10 @@
       pos = Math.min(pos + (currentSpeed * dt) / 1000, maxPos());
       target.scrollTo({ top: pos, behavior: 'instant' });
       written = pos;
+    }
+
+    function checkHold(t) {
+      if (t >= resumeAt) setState('running');
     }
 
     function resume() {
@@ -81,6 +89,15 @@
       setState('stopped');
     }
 
+    // The user scrolled by hand (wheel, touch, keys, a click or scrollbar drag).
+    // Chrome often sends no pointerup after a scrollbar drag, so every input
+    // is a fixed-length hold rather than "hold until released".
+    function userActivity() {
+      if (!ACTIVE.has(state)) return;
+      resumeAt = now() + HOLD_MS;
+      setState('holding');
+    }
+
     function setSpeed(n) {
       currentSpeed = clampSpeed(n);
       onChange(state, currentSpeed);
@@ -95,6 +112,7 @@
       faster: () => setSpeed(currentSpeed + SPEED_STEP),
       slower: () => setSpeed(currentSpeed - SPEED_STEP),
       setSpeed,
+      userActivity,
       getState: () => state,
       getSpeed: () => currentSpeed,
     };
