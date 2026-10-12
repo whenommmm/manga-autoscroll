@@ -11,7 +11,9 @@
 
   function keyAction(event) {
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return null;
-    if (isEditable(event.target)) return null;
+    // composedPath()[0] is the real focused element, even inside a web component.
+    const origin = event.composedPath ? event.composedPath()[0] : event.target;
+    if (isEditable(origin)) return null;
     if (Object.hasOwn(ACTIONS, event.key)) return ACTIONS[event.key];
     return SCROLL_KEYS.has(event.key) ? 'activity' : null;
   }

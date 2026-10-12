@@ -46,6 +46,16 @@ test('typing in text fields is left alone', () => {
   }
 });
 
+test('typing in a text field inside a web component is left alone', () => {
+  // At the window listener, event.target is the component's host element;
+  // composedPath()[0] is the real input inside its shadow root.
+  const host = { tagName: 'COMMENT-BOX', isContentEditable: false };
+  const input = { tagName: 'INPUT', isContentEditable: false };
+  const composedPath = () => [input, host, body];
+  assert.equal(press(' ', { target: host, composedPath }), null);
+  assert.equal(press('-', { target: host, composedPath }), null);
+});
+
 test('keys during IME composition are left alone', () => {
   assert.equal(press(' ', { isComposing: true }), null);
 });
